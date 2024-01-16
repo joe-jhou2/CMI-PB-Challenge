@@ -1,0 +1,97 @@
+---
+title: "Prediction on CCL3 Day3"
+author: "Joe Hou, Yunda Huang, James Kobie"
+date: "2024-01-13"
+output: html_document
+---
+
+<div style="font-size:20px;">
+For the specific goal of predicting CCL3 gene expression on Day 3, we have chosen to use only the BTM (blood transcription module) scores that derived from RNAseq TPM value from the 2020 and 2021 dataset. 
+</div>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(SuperLearner)
+library(caret)
+library(dplyr)
+library(xlsx)
+load("../ProcessedData/RNA_data_selection.Rdata")
+load("../ProcessedData/Prediction2022_All_Day0.Rdata")
+load("../ProcessedData/Subject_Specimen_info.Rdata")
+source("../Markdown/SuperLearnerMethod.R")
+```
+
+```{r, warning=FALSE}
+sl.library = list("SL.mean",
+                  "SL.glmnet.ridge",
+                  "SL.glmnet.25",
+                  "SL.glmnet.50",
+                  "SL.glmnet.75",
+                  "SL.glmnet.lasso",
+                  "SL.biglasso", 
+                  "SL.ranger.imp",
+                  "SL.ranger.reg",
+                  "SL.ranger.small",
+                  "SL.ranger.large")
+#------------------------------------------------------------------------------#
+# 2. training on RNA dataset only, by using 345 BTMs only
+#------------------------------------------------------------------------------#
+Subject_meta = rbind(Subject_2020, Subject_2021)
+
+BTM.input_data = BTM_Day0_Day3_CCL3 %>%
+  left_join(Subject_meta %>% 
+              mutate(subject_id = as.character(subject_id)) %>% 
+              dplyr::select(all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  mutate(gender_numeric = ifelse(biological_sex == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>% 
+  dplyr::rename(Age = age_at_boost) %>%
+  dplyr::select(-c(subject_id, infancy_vac, biological_sex)) %>%
+  dplyr::mutate_if(is.numeric, round, digits = 2)
+
+# reomve a few modules that not exist in the prediction data
+BTM.input_data = BTM.input_data[,!colnames(BTM.input_data) %in% c("interferon alpha response (II) (M158.1)", "olfactory receptors (M228)")]
+
+# run SL
+CCL3.D3.BTM = sl(BTM.input_data, target.feature = "target_D3_CCL3", sl.library, cv.fold = 5)
+CCL3.D3.BTM$model
+CCL3.D3.BTM$cv
+
+#-----------------------------------------------------------------------------#
+# Prediction
+#-----------------------------------------------------------------------------#
+BTM_2022_Day0 = BTM_2022_Day0 %>%
+  left_join(Subject_2022 %>% 
+              mutate(subject_id = as.character(subject_id)) %>% 
+              dplyr::select(all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  mutate(gender_numeric = ifelse(biological_sex == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>% 
+  dplyr::rename(Age = age_at_boost) %>%
+  dplyr::mutate_if(is.numeric, round, digits = 2)
+
+setdiff(colnames(BTM.input_data), colnames(BTM_2022_Day0))
+setdiff(colnames(BTM_2022_Day0), colnames(BTM.input_data))
+
+# use common features in training data
+common_cols = intersect(colnames(BTM_2022_Day0), 
+                        colnames(BTM.input_data))
+
+predicting_data = BTM_2022_Day0[, common_cols]
+
+# reorder the columns matching with training dataset
+predicting_data = predicting_data[, names(BTM.input_data[,-258])]
+
+predicting_data = data.frame(BTM_2022_Day0[,c("subject_id", "biological_sex", "infancy_vac")], 
+                             predicting_data)
+
+# Run predict
+pred = predict(CCL3.D3.BTM$model,  predicting_data[,-c(1:3)], onlySL = TRUE)
+
+# pull out data and rank
+res = data.frame(predicting_data[,c(1:3, 261)], CCL3_predict_value = pred$pred, CCL3_Rank = rank(-pred$pred))
+
+res
+
+write.xlsx(res, file = "../PredictionResults/Prediction CCL3.xlsx", col.names = TRUE, row.names = FALSE)
+
+```

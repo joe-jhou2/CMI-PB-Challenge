@@ -1,0 +1,103 @@
+---
+title: "Prediction on PT IgG FC(Day14/Day0)"
+author: "Joe Hou, Yunda Huang, James Kobie"
+date: "2024-01-13"
+output: html_document
+---
+
+<div style="font-size:20px;">
+We have observed that the parameters for antibody (Ab) variables are not consistent across the datasets spanning three years. Additionally, the availability of subjects for each assay varies. Including more assays or parameters in our model tends to reduce the number of subjects that can be utilized, as illustrated in the previous Venn diagram.
+
+To address these challenges, we have experimented with various combinations of assays and datasets. This includes models that
+
+exclusively use Ab assay data, focusing solely on either the 2020 or 2021 Ab datasets, or, more comprehensively, integrating Ab assay data with results from other assays. We have evaluated the performance of our models across these different data combinations.
+
+For the specific goal of predicting PT-IgG on Fold change of Day 14/Day 0, we have chosen to use only the Ab results from the 2020 and 2021 datasets. This decision is based on our assessments of model performance and data consistency within these specific datasets.
+</div>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(SuperLearner)
+library(caret)
+library(dplyr)
+library(xlsx)
+load("../ProcessedData/Ab_data_selection.Rdata")
+load("../ProcessedData/Prediction2022_All_Day0.Rdata")
+source("../Markdown/SuperLearnerMethod.R")
+```
+
+```{r, warning=FALSE}
+sl.library = list("SL.mean",
+                  "SL.glmnet.ridge",
+                  "SL.glmnet.25",
+                  "SL.glmnet.50",
+                  "SL.glmnet.75",
+                  "SL.glmnet.lasso",
+                  "SL.ranger.imp",
+                  "SL.ranger.reg",
+                  "SL.ranger.small",
+                  "SL.ranger.large")
+
+#-----------------------------------------------------------------------------#
+# Training
+#-----------------------------------------------------------------------------#
+# combine fold change data
+FC_IgG_PT = bind_rows(Ab_2020_D0_D14_FC, Ab_2021_D0_D14_FC)
+
+# combine 2yrs Ab data
+Ab_common_cols = intersect(colnames(Ab_2020_D0_D14_log_norm_merge), 
+                           colnames(Ab_2021_D0_D14_log_norm_merge))
+
+Ab_combine = bind_rows(dplyr::select(Ab_2020_D0_D14_log_norm_merge, Ab_common_cols), 
+                       dplyr::select(Ab_2021_D0_D14_log_norm_merge, Ab_common_cols)) 
+
+sel_subject = intersect(Ab_combine$subject_id, FC_IgG_PT$subject_id)
+
+PT.IgG.FC.2020.2021.input_data = Ab_combine %>%
+  mutate(subject_id = as.character(subject_id)) %>%
+  left_join(FC_IgG_PT %>% 
+              mutate(subject_id = as.character(subject_id)) %>%
+              filter(subject_id %in% sel_subject) %>%
+              dplyr::select("subject_id", "D14_D0_FC_IgG_PT_log_norm"), by = "subject_id") %>%
+  dplyr::select(-c(subject_id, infancy_vac, Gender, target_D14_PTIgG)) %>%
+  dplyr::mutate_if(is.numeric, round, digits = 2)
+
+# remove one row that contain NA
+rows_with_na = apply(PT.IgG.FC.2020.2021.input_data , 1, function(x) any(is.na(x)))
+table(rows_with_na)
+PT.IgG.FC.2020.2021.input_data  = PT.IgG.FC.2020.2021.input_data [!rows_with_na, ]
+
+# run SL
+PT.IgG.FC.2021.2022 = sl(PT.IgG.FC.2020.2021.input_data, 
+                         target.feature = "D14_D0_FC_IgG_PT_log_norm", 
+                         sl.library, cv.fold = 5)
+
+#-----------------------------------------------------------------------------#
+# Prediction
+#-----------------------------------------------------------------------------#
+# Replace 'Fim2/3' with 'FIM2/3' in the column names
+colnames(Ab_2022_Day0_log_norm) = gsub("Fim2/3", "FIM2/3", colnames(Ab_2022_Day0_log_norm))
+
+# use common features in training data
+common_cols = intersect(colnames(Ab_2022_Day0_log_norm), 
+                        colnames(PT.IgG.FC.2020.2021.input_data))
+
+predicting_data = Ab_2022_Day0_log_norm[,c("subject_id", "Age", "Gender", "infancy_vac", common_cols)]
+
+# / symbol was removed by SL, need to change our predicting data align with that
+# reorder the columns matching with training dataset
+predicting_data = predicting_data[, names(PT.IgG.FC.2020.2021.input_data[,-35])]
+
+predicting_data = data.frame(Ab_2022_Day0_log_norm[,c("subject_id", "Gender", "infancy_vac")], 
+                             predicting_data)
+
+# Run predict
+pred = predict(PT.IgG.FC.2021.2022$model, predicting_data[,-c(1:3)], onlySL = TRUE)
+
+# pull out data and rank
+res = data.frame(predicting_data[,c(1:4)], PT_IgG_predict_value = pred$pred, PT_IgG_FC_Rank = rank(-pred$pred))
+
+res
+
+write.xlsx(res, file = "../PredictionResults/Prediction PT IgG FC.xlsx", col.names = TRUE, row.names = FALSE)
+```

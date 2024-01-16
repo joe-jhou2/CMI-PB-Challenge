@@ -1,0 +1,129 @@
+---
+title: "Data Description and Check - Ab"
+output: html_document
+date: "2024-01-12"
+author: Joe Hou, Yunda Huang, James Kobie
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(hrbrthemes)
+library(GGally)
+library(viridis)
+library(dplyr)
+library(tidyverse)
+library(corrplot)
+library(RColorBrewer)
+library(xlsx)
+library(funkyheatmap)
+load("../RawData/Subject_Specimen_info.Rdata")
+```
+
+<div style="font-size:20px;">
+  Here's the data check and description on antibody data over 2020, 2021 and 2022 dataset. 
+</div>
+
+# <span style="font-size:24px;"> Data loading and processing </span>
+
+```{r}
+# load data, Ab titre
+Ab_2020 = read.csv("../RawData/Training/2020/2020LD_plasma_ab_titer.tsv", sep = "\t")
+Ab_2021 = read.csv("../RawData/Training/2021/2021LD_plasma_ab_titer.tsv", sep = "\t")
+Ab_2022 = read.csv("../RawData/Prediction/2022BD_plasma_ab_titer.tsv", sep = "\t")
+
+# name new column contains antigen and isotype
+Ab_2020 = Ab_2020%>% 
+  mutate(Ag_Ig = paste(antigen, isotype, sep = "_"))
+
+Ab_2021 = Ab_2021%>% 
+  mutate(Ag_Ig = paste(antigen, isotype, sep = "_"))
+
+Ab_2022 = Ab_2022%>% 
+  mutate(Ag_Ig = paste(antigen, isotype, sep = "_"))
+```
+
+# <span style="font-size:24px;">Ab variables availability across 2020, 2021 and 2022 dataset </span>
+
+```{r overlap figure}
+# how many Ag_Ig variables in total
+length(unique(vctrs::vec_c(Ab_2020$Ag_Ig, Ab_2021$Ag_Ig, Ab_2022$Ag_Ig)))
+
+# check overlap
+overlap_check = data.frame(matrix(NA, ncol = 4, nrow = 83))
+colnames(overlap_check) = c("Ab", "Y2020", "Y2021", "Y2022")
+overlap_check$Ab = unique(vctrs::vec_c(unique(Ab_2020$Ag_Ig), unique(Ab_2021$Ag_Ig)))
+overlap_check[overlap_check$Ab  %in% unique(Ab_2020$Ag_Ig),2] = 1
+overlap_check[overlap_check$Ab  %in% unique(Ab_2021$Ag_Ig),3] = 1
+overlap_check[overlap_check$Ab  %in% unique(Ab_2022$Ag_Ig),4] = 1
+overlap_check[is.na(overlap_check)] = 0
+
+overlap_check = overlap_check %>% arrange(desc(rowSums(dplyr::select(., Y2020, Y2021, Y2022) == 1)),
+                                          desc(Y2020),
+                                          desc(Y2021),
+                                          desc(Y2022))
+```
+
+```{r, echo=FALSE, fig.width=10, fig.height=15, warning=FALSE, message=FALSE}
+# plot cell type overlap over years
+column_info = tribble(
+  ~id,         ~group,      ~name,    ~geom,            ~palette,           ~options,
+  "Ab",          "",      "",       "text",           NA,                     list(hjust = 1, width = 8),
+  "Y2020",       "",       "Y2020",     "funkyrect",     "palette1",          list(),
+  "Y2021",       "",       "Y2021",     "funkyrect",     "palette1",          list(),
+  "Y2022",       "",       "Y2022",     "funkyrect",     "palette1",          list())
+
+funky_heatmap(overlap_check, column_info = column_info, scale_column = FALSE, 
+              palettes =  list(palette1 = "black"), 
+              expand = list(xmax = 1), col_annot_angle = 90)
+```
+
+# <span style="font-size:24px;">Check main variables across dataset </span>
+
+```{r}
+# clean up and sort out
+Ab_2020_sel = Ab_2020 %>% 
+  left_join(select(Specimen_2020_sel, all_of(c("specimen_id", "subject_id", "dataset", "day_plot"))), by = "specimen_id") %>%
+  left_join(select(Subject_2020, all_of(c("subject_id", "infancy_vac"))), by = "subject_id") %>%
+  filter(antigen %in% c("FHA", "FIM2/3", "PRN", "PT", "DT", "TT", "OVA")) %>%
+  filter(isotype != c("IgE"))
+
+Ab_2021_sel = Ab_2021 %>% 
+  left_join(select(Specimen_2021_sel, all_of(c("specimen_id", "subject_id", "dataset", "day_plot"))), by = "specimen_id") %>%
+  left_join(select(Subject_2021, all_of(c("subject_id", "infancy_vac"))), by = "subject_id")
+
+# combine two datasets
+Ab_dataset_combine = rbind(Ab_2020_sel, Ab_2021_sel) %>% 
+  filter(day_plot %in% c(0, 1, 3, 7, 14)) %>% 
+  select(all_of(c("isotype", "antigen", "MFI_normalised", "MFI","day_plot", "subject_id", "infancy_vac", "dataset"))) %>%
+  mutate(Day = factor(paste0("Day", day_plot), levels = c("Day0", "Day1", "Day3", "Day7", "Day14"))) %>%
+  mutate(antigen = factor(antigen, levels = c("FHA", "FIM2/3", "PRN", "PT", "DT", "TT", "OVA"))) %>%
+  unite(vac_yr, c("infancy_vac", "dataset")) %>%
+  mutate(vac_yr = factor(vac_yr, levels = c("aP_2020", "wP_2020", "aP_2021", "wP_2021")))
+```
+
+
+```{r, echo=FALSE, fig.width=12, fig.height=12}
+Ab_dataset_combine %>%
+  filter(isotype == "IgG") %>% 
+  ggplot(aes(x = Day , y = MFI_normalised, group = subject_id, color = vac_yr)) +
+  geom_line() +
+  geom_point(aes()) +
+  scale_x_discrete(expand = c(0.05,0.05)) + 
+  ylab("Normalized MFI value") +
+  ggtitle("IgG Titer only") +
+  facet_grid(antigen ~ vac_yr, scales = "free_y") + 
+  scale_color_manual(values=c("aP_2020" = "#DB4437", "wP_2020" = "#0F9D58",  
+                              "aP_2021"=  "#F4B400", "wP_2021"= "#4285F4")) + 
+  theme_bw() + 
+  theme(panel.background = element_rect( color = "black"),
+        panel.grid.major = element_line(color = "gray"),
+        panel.grid.minor = element_line(color = "gray"),
+        panel.spacing.x = unit(1.5, "lines"),
+        strip.text = element_text(size = 16),
+        plot.title = element_text(size = 20, hjust = 0.5),
+        axis.text.x  = element_text(size = 14),
+        axis.text.y  = element_text(size = 14),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 14),
+        legend.position = "none")
+```

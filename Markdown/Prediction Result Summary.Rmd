@@ -1,0 +1,53 @@
+---
+title: "Prediction Result Summary"
+author: "Joe Hou, Yunda Huang, James Kobie"
+date: "2024-01-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(xlsx)
+library(dplyr)
+```
+
+```{r}
+Ab = read.xlsx("../PredictionResults/Prediction PT IgG.xlsx", sheetIndex = 1)
+Ab_FC = read.xlsx("../PredictionResults/Prediction PT IgG FC.xlsx", sheetIndex = 1)
+
+Mono = read.xlsx("../PredictionResults/Prediction Mono.xlsx", sheetIndex = 1)
+Mono_FC = read.xlsx("../PredictionResults/Prediction Mono FC.xlsx", sheetIndex = 1)
+
+CCL3 = read.xlsx("../PredictionResults/Prediction CCL3.xlsx", sheetIndex = 1)
+CCL3_FC = read.xlsx("../PredictionResults/Prediction CCL3 FC.xlsx", sheetIndex = 1)
+
+Final_res = Ab %>%
+  mutate(subject_id = as.character(subject_id)) %>%
+  dplyr::select(all_of(c("subject_id", "Age","Gender", "infancy_vac", "PT_IgG_Rank"))) %>%
+  left_join(Ab_FC %>%
+              mutate(subject_id = as.character(subject_id)) %>% 
+              dplyr::select(all_of(c("subject_id", "PT_IgG_FC_Rank"))), by = "subject_id") %>%
+  left_join(Mono %>% 
+              mutate(subject_id = as.character(subject_id)) %>% 
+              dplyr::select(all_of(c("subject_id", "Mono_Rank"))), by = "subject_id") %>%
+  left_join(Mono_FC %>% 
+              mutate(subject_id = as.character(subject_id)) %>% 
+              dplyr::select(all_of(c("subject_id", "Mono_FC_Rank"))), by = "subject_id") %>%
+  left_join(CCL3 %>% 
+              mutate(subject_id = as.character(subject_id)) %>% 
+              dplyr::select(all_of(c("subject_id", "CCL3_Rank"))), by = "subject_id") %>%
+  left_join(CCL3_FC %>% 
+              mutate(subject_id = as.character(subject_id)) %>% 
+              dplyr::select(all_of(c("subject_id", "CCL3_FC_Rank"))), by = "subject_id") %>%
+  arrange(subject_id) %>%
+  rename("1.1) IgG-PT-D14-titer-Rank" = "PT_IgG_Rank",
+         "1.2) IgG-PT-D14-FC-Rank"= "PT_IgG_FC_Rank",
+         "2.1) Monocytes-D1-Rank" = "Mono_Rank",
+         "2.2) Monocytes-D1-FC-Rank" = "Mono_FC_Rank",
+         "3.1) CCL3-D3-Rank" = "CCL3_Rank",
+         "3.2) CCL3-D3-FC-Rank" = "CCL3_FC_Rank")
+
+Final_res
+
+write.xlsx(Final_res, file = "../PredictionResults/Final Result Summary.xlsx", col.names = TRUE, row.names = FALSE)
+```

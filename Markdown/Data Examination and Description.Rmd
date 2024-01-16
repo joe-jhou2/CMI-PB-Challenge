@@ -1,0 +1,270 @@
+---
+title: "Data Preparation and Description"
+author: "Joe Hou, Yunda Huang, James Kobie"
+date: "2024-01-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(ggrepel)
+library(ggpubr)
+library(tidyverse)
+library(dplyr)
+library(reshape2)
+library(RColorBrewer)
+library(patchwork)
+library(ggh4x)
+library(rstatix)
+library(ggdist)
+library(xlsx)
+library(funkyheatmap)
+library(tibble)
+library(kableExtra)
+library(clusterProfiler)
+library(ggVennDiagram)
+```
+
+<div style="font-size:20px;">
+  We first prepare the subject and specimen data and follow by examining the basic data including age, ethnicity, gender et.al across 3 year data sets.
+</div>
+
+# <span style="font-size:24px;"> 1. Data loading and processing </span>
+
+```{r}
+#-----------------------------------------------------------------------------------------#
+# Process Subject info
+#-----------------------------------------------------------------------------------------#
+# load subject info
+Subject_2020 = read.csv("../RawData/Training/2020/2020LD_subject.tsv", sep = "\t")
+Subject_2021 = read.csv("../RawData/Training/2021/2021LD_subject.tsv", sep = "\t")
+Subject_2022 = read.csv("../RawData/Prediction/2022BD_subject.tsv", sep = "\t")
+
+# Define a function for processing Subject data
+process_subject_data = function(subject_data) {
+  subject_data %>%
+    mutate(
+      year_of_birth = as.Date(year_of_birth),
+      date_of_boost = as.Date(date_of_boost),
+      age_at_boost = as.integer(format(date_of_boost, "%Y")) - as.integer(format(year_of_birth, "%Y")),
+      age = age_at_boost - (as.integer(format(date_of_boost, "%m%d")) < as.integer(format(year_of_birth, "%m%d")))
+    )
+}
+
+# Apply the function to each dataset
+Subject_2020 = process_subject_data(Subject_2020)
+Subject_2021 = process_subject_data(Subject_2021)
+Subject_2022 = process_subject_data(Subject_2022)
+
+# two datasets have the same data format, combine them
+Subj_info = rbind(Subject_2020, Subject_2021)
+
+#-----------------------------------------------------------------------------------------#
+# Process Specimen Info
+#-----------------------------------------------------------------------------------------#
+# load specimen info
+Specimen_2020 = read.csv("../RawData/Training/2020/2020LD_specimen.tsv", sep = "\t"); Specimen_2020$dataset = "2020"
+Specimen_2021 = read.csv("../RawData/Training/2021/2021LD_specimen.tsv", sep = "\t"); Specimen_2021$dataset = "2021"
+Specimen_2022 = read.csv("../RawData/Prediction/2022BD_specimen.tsv", sep = "\t"); Specimen_2022$dataset = "2022"
+
+# Define a function for processing
+process_specimen_data = function(specimen_data) {
+  specimen_data %>%
+    filter(actual_day_relative_to_boost < 28) %>%
+    mutate(day_plot = actual_day_relative_to_boost) %>%
+    mutate(day_plot = case_when(
+      day_plot < 0 ~ 0,         # prior
+      day_plot %in% 2:4 ~ 3,    # day3 allows day2-4
+      day_plot %in% 5:9 ~ 7,    # day7 allows day5-9
+      day_plot %in% 10:18 ~ 14, # day14 allows day10-15
+      TRUE ~ day_plot           # Keep other values as they are
+    ))
+}
+
+# Apply the function to each dataset
+Specimen_2020_sel = process_specimen_data(Specimen_2020)
+Specimen_2021_sel = process_specimen_data(Specimen_2021)
+Specimen_2022_sel = process_specimen_data(Specimen_2022)
+
+save(Specimen_2020_sel, Specimen_2021_sel, Specimen_2022_sel,
+     Subject_2020, Subject_2021, Subject_2022,
+     file = "../ProcessedData/Subject_Specimen_info.Rdata")
+```
+
+# <span style="font-size:24px;"> 2. Demographic Data Viz </span>
+
+```{r,fig.width=10, fig.height=4, warning=FALSE, message=FALSE}
+#-----------------------------------------------------------------------------------------#
+# explore subject demographic info
+#-----------------------------------------------------------------------------------------#
+# plot by age
+theme_age = theme(panel.border = element_rect(colour = "black", fill = NA, size = 1), 
+                  panel.grid.major = element_blank(),
+                  panel.grid.minor = element_blank(),
+                  panel.background = element_blank(),
+                  strip.text = element_text(size = 18),
+                  axis.text.y = element_text(size = 18, colour = "black"), 
+                  axis.text.x = element_text(size = 18, angle = 0, hjust = 0.5, vjust = 1, colour = "black"),
+                  axis.title.y = element_text(size = 20),
+                  legend.text = element_text(size = 18))
+
+ggplot(Subj_info, aes(x = infancy_vac, y = age)) + 
+  geom_jitter(aes(color = biological_sex, fill = biological_sex, shape = race), width = 0.2, alpha = 1.0, size = 3) +
+  geom_boxplot(position = position_nudge(x = 0), width = 0.3, alpha = 0.2, outlier.colour = NA, outlier.alpha = 1) +
+  scale_fill_manual(name = "Sex", values = c("Female" = "red", "Male" = "blue")) +
+  scale_color_manual(name = "Sex", values = c("Female" = "red", "Male" = "blue")) +
+  scale_shape_manual(name = "Race", values = c(15, 16, 17, 18, 19, 8, 9)) + 
+  labs(x = NULL, y = "Age (yrs) at boost") +
+  theme_age
+
+ggplot(Subj_info, aes(x = infancy_vac, y = age)) + 
+  geom_jitter(aes(color = biological_sex, fill = biological_sex, shape = race), width = 0.2, alpha = 1.0, size = 3) +
+  geom_boxplot(position = position_nudge(x = 0), width = 0.3, alpha = 0.2, outlier.colour = NA, outlier.alpha = 1) +
+  scale_fill_manual(name = "Sex", values = c("Female" = "red", "Male" = "blue")) +
+  scale_color_manual(name = "Sex", values = c("Female" = "red", "Male" = "blue")) +
+  scale_shape_manual(name = "Race", values = c(15, 16, 17, 18, 19, 8, 9)) + 
+  labs(x = NULL, y = "Age (yrs) at boost") + 
+  facet_grid(~ dataset) + 
+  theme_age
+```
+
+# <span style="font-size:24px;"> 3. The availability of Ab data variables across dataset </span>
+
+```{r}
+# load data, Ab titre
+Ab_2020 = read.csv("../RawData/Training/2020/2020LD_plasma_ab_titer.tsv", sep = "\t")
+Ab_2021 = read.csv("../RawData/Training/2021/2021LD_plasma_ab_titer.tsv", sep = "\t")
+Ab_2022 = read.csv("../RawData/Prediction/2022BD_plasma_ab_titer.tsv", sep = "\t")
+
+# name new column contains antigen and isotype
+Ab_2020 = Ab_2020%>% 
+  mutate(Ag_Ig = paste(antigen, isotype, sep = "_"))
+
+Ab_2021 = Ab_2021%>% 
+  mutate(Ag_Ig = paste(antigen, isotype, sep = "_"))
+
+Ab_2022 = Ab_2022%>% 
+  mutate(Ag_Ig = paste(antigen, isotype, sep = "_"))
+```
+
+
+```{r, echo=FALSE, fig.width=10, fig.height=15, warning=FALSE, message=FALSE}
+# how many Ag_Ig variables in total
+length(unique(vctrs::vec_c(Ab_2020$Ag_Ig, Ab_2021$Ag_Ig, Ab_2022$Ag_Ig)))
+
+# check overlap
+overlap_check = data.frame(matrix(NA, ncol = 4, nrow = 83))
+colnames(overlap_check) = c("Ab", "Y2020", "Y2021", "Y2022")
+overlap_check$Ab = unique(vctrs::vec_c(unique(Ab_2020$Ag_Ig), unique(Ab_2021$Ag_Ig)))
+overlap_check[overlap_check$Ab  %in% unique(Ab_2020$Ag_Ig),2] = 1
+overlap_check[overlap_check$Ab  %in% unique(Ab_2021$Ag_Ig),3] = 1
+overlap_check[overlap_check$Ab  %in% unique(Ab_2022$Ag_Ig),4] = 1
+overlap_check[is.na(overlap_check)] = 0
+
+overlap_check = overlap_check %>% arrange(desc(rowSums(dplyr::select(., Y2020, Y2021, Y2022) == 1)),
+                                          desc(Y2020),
+                                          desc(Y2021),
+                                          desc(Y2022))
+
+# plot cell type overlap over years
+column_info = tribble(
+  ~id,         ~group,      ~name,    ~geom,            ~palette,           ~options,
+  "Ab",          "",      "",       "text",           NA,                     list(hjust = 1, width = 8),
+  "Y2020",       "",       "Y2020",     "funkyrect",     "palette1",          list(),
+  "Y2021",       "",       "Y2021",     "funkyrect",     "palette1",          list(),
+  "Y2022",       "",       "Y2022",     "funkyrect",     "palette1",          list())
+
+funky_heatmap(overlap_check, column_info = column_info, scale_column = FALSE, 
+              palettes =  list(palette1 = "black"), 
+              expand = list(xmax = 1), col_annot_angle = 90)
+```
+
+# <span style="font-size:24px;"> 4. The availability of Cell frequency data variables across dataset </span>
+
+```{r}
+# load data, cell frequency
+cellfreq_2020 = read.csv("../RawData/Training/2020/2020LD_pbmc_cell_frequency.tsv", sep = "\t")
+cellfreq_2021 = read.csv("../RawData/Training/2021/2021LD_pbmc_cell_frequency.tsv", sep = "\t")
+cellfreq_2022 = read.csv("../RawData/Prediction/2022BD_pbmc_cell_frequency.tsv", sep = "\t")
+```
+
+```{r, echo=FALSE, fig.width=10, fig.height=15, warning=FALSE, message=FALSE}
+# check overlap
+overlap_check = data.frame(matrix(NA, ncol = 4, nrow = 53))
+colnames(overlap_check) = c("celltype","Y2020", "Y2021", "Y2022")
+overlap_check$celltype = unique(combine(unique(cellfreq_2020$cell_type_name), unique(cellfreq_2021$cell_type_name)))
+overlap_check[overlap_check$celltype  %in% unique(cellfreq_2020$cell_type_name),2] = 1
+overlap_check[overlap_check$celltype  %in% unique(cellfreq_2021$cell_type_name),3] = 1
+overlap_check[overlap_check$celltype  %in% unique(cellfreq_2022$cell_type_name),4] = 1
+overlap_check[is.na(overlap_check)] = 0
+
+overlap_check = overlap_check %>% arrange(desc(rowSums(dplyr::select(., Y2020, Y2021, Y2022) == 1)),
+                                desc(Y2020),
+                                desc(Y2021),
+                                desc(Y2022))
+
+# plot cell type overlap over years
+column_info = tribble(
+  ~id,         ~group,      ~name,    ~geom,            ~palette,           ~options,
+  "celltype",      "",       "",       "text",           NA,                 list(hjust = 1, width = 21),
+  "Y2020",       "",       "Y2020",     "funkyrect",     "palette1",          list(),
+  "Y2021",       "",       "Y2021",     "funkyrect",     "palette1",          list(),
+  "Y2022",       "",       "Y2022",     "funkyrect",     "palette1",          list())
+
+funky_heatmap(overlap_check, column_info = column_info, scale_column = FALSE, 
+              palettes =  list(palette1 = "black"), 
+              expand = list(xmax = 1), col_annot_angle = 90)
+```
+
+# <span style="font-size:24px;"> 5. The availability of Cytokine data variables across dataset </span>
+
+```{r}
+# load data, cytokine
+cytokine_2020 = read.csv("../RawData/Training/2020/2020LD_plasma_cytokine_concentration.tsv", sep = "\t")
+cytokine_2021 = read.csv("../RawData/Training/2021/2021LD_plasma_cytokine_concentration.tsv", sep = "\t")
+cytokine_2022 = read.csv("../RawData/Prediction/2022BD_plasma_cytokine_concentration.tsv", sep = "\t")
+```
+
+```{r, echo=FALSE, fig.width=10, fig.height=12, warning=FALSE, message=FALSE}
+# check overlap
+overlap_check = data.frame(matrix(NA, ncol = 5, nrow = 45))
+colnames(overlap_check) = c("UNIPROT", "Protein","Y2020", "Y2021", "Y2022")
+overlap_check$UNIPROT = unique(cytokine_2021$protein_id)
+overlap_check[overlap_check$UNIPROT  %in% unique(cytokine_2020$protein_id),3] = 1
+overlap_check[overlap_check$UNIPROT  %in% unique(cytokine_2021$protein_id),4] = 1
+overlap_check[overlap_check$UNIPROT  %in% unique(cytokine_2022$protein_id),5] = 1
+overlap_check[is.na(overlap_check)] = 0
+
+overlap_check = overlap_check %>%
+  mutate(UNIPROT_first_part = sapply(strsplit(UNIPROT, "_"), "[", 1))
+
+# convert UNIPROT to Gene Symbol
+Protein_IDs = bitr(overlap_check$UNIPROT_first_part, fromType="UNIPROT" , toType="SYMBOL", OrgDb="org.Hs.eg.db") 
+Protein_names = distinct(Protein_IDs, UNIPROT, .keep_all = TRUE) 
+write.csv(Protein_names, file = "Protein_names.csv", row.names = FALSE)
+
+for (i in 1:nrow(Protein_names)) {
+  if (Protein_names$UNIPROT[i] == overlap_check$UNIPROT_first_part[i]) {
+    overlap_check$Protein[i] = Protein_names$SYMBOL[i]
+  }
+}
+
+overlap_check = overlap_check %>% arrange(desc(rowSums(dplyr::select(., Y2020, Y2021, Y2022) == 1)),
+                                          desc(Y2020),
+                                          desc(Y2021),
+                                          desc(Y2022))
+
+# plot cell type overlap over years
+column_info = tribble(
+  ~id,         ~group,      ~name,    ~geom,            ~palette,           ~options,
+  "UNIPROT",      "",       "",       "text",           NA,                  list(hjust = 1, width = 6),
+  "Protein",      "",       "",       "text",           NA,                  list(hjust = 1, width = 4),
+  "Y2020",       "",       "Y2020",     "funkyrect",     "palette1",          list(),
+  "Y2021",       "",       "Y2021",     "funkyrect",     "palette1",          list(),
+  "Y2022",       "",       "Y2022",     "funkyrect",     "palette1",          list())
+
+funky_heatmap(overlap_check, column_info = column_info, scale_column = FALSE, 
+              palettes =  list(palette1 = "black"), 
+              expand = list(xmax = 1), col_annot_angle = 90)
+```

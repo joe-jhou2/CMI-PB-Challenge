@@ -1,0 +1,95 @@
+---
+title: "Prediction on Monocytes"
+author: "Joe Hou, Yunda Huang, James Kobie"
+date: "2024-01-13"
+output: html_document
+---
+
+<div style="font-size:20px;">
+The similar investigation was performed on Monocytes frequency as well. We've been evaluating the model performance on different data combinations. 
+
+For the specific goal of predicting Monocytes on Day 1, we have chosen to use only the cell frequency results from the 2021 dataset. 
+</div>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(SuperLearner)
+library(caret)
+library(dplyr)
+library(xlsx)
+load("../ProcessedData/CellFreq_data_selection.Rdata")
+load("../ProcessedData/Prediction2022_All_Day0.Rdata")
+source("../Markdown/SuperLearnerMethod.R")
+```
+
+```{r, warning=FALSE}
+sl.library = list("SL.mean",
+                  "SL.glmnet.ridge",
+                  "SL.glmnet.25",
+                  "SL.glmnet.50",
+                  "SL.glmnet.75",
+                  "SL.glmnet.lasso",
+                  "SL.ranger.imp",
+                  "SL.ranger.reg",
+                  "SL.ranger.small",
+                  "SL.ranger.large")
+
+#-----------------------------------------------------------------------------#
+# Training
+#-----------------------------------------------------------------------------#
+Mono.D1.2021.input_data = Cell_2021_D0_D1_log_norm_merge %>%
+  dplyr::select(-c(subject_id, infancy_vac, Gender)) %>%
+  dplyr::mutate_if(is.numeric, round, digits = 2)
+
+# remove one row that contain NA
+# impute na value by median
+# Loop over each column in the dataframe
+# Initialize a vector to keep track of columns to be removed
+columns_to_remove <- c()
+for (i in seq_along(Mono.D1.2021.input_data)) {
+  # Calculate the percentage of NA values in the column
+  na_percentage <- sum(is.na(Mono.D1.2021.input_data[[i]])) / nrow(Mono.D1.2021.input_data) * 100
+  
+  # Check if the entire column is NA or if NA percentage is greater than 20%
+  if (all(is.na(Mono.D1.2021.input_data[[i]])) || na_percentage > 20) {
+    # Add the column to the list of columns to be removed
+    columns_to_remove <- c(columns_to_remove, names(Mono.D1.2021.input_data)[i])
+  } else if (is.numeric(Mono.D1.2021.input_data[[i]])) {
+    # If the column is numeric and NA percentage is less than or equal to 20%, replace NA with median
+    Mono.D1.2021.input_data[[i]][is.na(Mono.D1.2021.input_data[[i]])] <- median(Mono.D1.2021.input_data[[i]], na.rm = TRUE)
+  }
+}
+
+# Remove the identified columns from the dataframe
+Mono.D1.2021.input_data = Mono.D1.2021.input_data[, !(names(Mono.D1.2021.input_data) %in% columns_to_remove)]
+
+# run SL
+Mono.D1.2021 = sl(Mono.D1.2021.input_data, target.feature = "target_D1_Mono", sl.library, cv.fold = 3)
+
+#-----------------------------------------------------------------------------#
+# Prediction
+#-----------------------------------------------------------------------------#
+# use common features in training data
+common_cols = intersect(colnames(Cell_2022_Day0_log_norm), 
+                        colnames(Mono.D1.2021.input_data))
+
+predicting_data = Cell_2022_Day0_log_norm[,c("subject_id", "Age", "Gender", "infancy_vac", common_cols)]
+
+# reorder the columns matching with training dataset
+predicting_data = predicting_data[, names(Mono.D1.2021.input_data[,-54])]
+
+predicting_data = data.frame(Cell_2022_Day0_log_norm[,c("subject_id", "Gender", "infancy_vac")], 
+                             predicting_data)
+
+# Run predict
+pred = predict(Mono.D1.2021$model,  predicting_data[,-c(1:3)], onlySL = TRUE)
+
+# pull out data and rank
+res = data.frame(predicting_data[,c(1:4)], Mono_predict_value = pred$pred, Mono_Rank = rank(-pred$pred))
+
+res
+
+write.xlsx(res, file = "../PredictionResults/Prediction Mono.xlsx", col.names = TRUE, row.names = FALSE)
+
+```

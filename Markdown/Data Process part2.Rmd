@@ -1,0 +1,596 @@
+---
+title: "Data Processing part2"
+author: "Joe Hou, Yunda Huang, James Kobie"
+date: "2024-01-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(hrbrthemes)
+library(GGally)
+library(viridis)
+library(dplyr)
+library(tidyverse)
+library(corrplot)
+library(RColorBrewer)
+library(xlsx)
+library(clusterProfiler)
+library(reshape2)
+library(DESeq2)
+library(qusage)
+library(GSVA)
+library(org.Hs.eg.db)
+library(ggVennDiagram)
+load("../ProcessedData/Ab_dataset_training_combine.Rdata")
+load("../ProcessedData/cellfreq_dataset_training_combine.Rdata")
+load("../ProcessedData/cytokine_dataset_training_combine.Rdata")
+load("../ProcessedData/rnaseq_dataset_training_combine.Rdata")
+BTM = read.gmt("../RawData/BTM module database/BTM_TutorialPackage/BTM_for_GSEA_20131008.gmt")
+```
+
+<div style="font-size:20px;">
+  Continue to process the data, adding subject info into each dataset and assay, reshape, and clean-up, et.al.  
+</div>
+
+# <span style="font-size:24px;"> 1. Ab data processing </span>
+
+```{r}
+#------------------------------------------------------------------------------#
+# Ab data selection
+#------------------------------------------------------------------------------#
+# *** on 2020 dataset *** #
+# select Day0 baseline
+Ab_2020_Day0_log_norm = Ab_2020_sel %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "isotype_antigen", "MFI_normalised", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(MFI_normalised_log = log(MFI_normalised)) %>%
+  dplyr::select(-c(MFI_normalised)) %>%
+  pivot_wider(names_from = "isotype_antigen", values_from = "MFI_normalised_log") %>%
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender","gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+# select Day14 IgG PT
+Ab_2020_Day14_log_norm = Ab_2020_sel %>%
+  filter(timepoint == 14) %>%
+  filter(isotype_antigen == "IgG_PT") %>%
+  dplyr::select(all_of(c("subject_id", "isotype_antigen", "MFI_normalised", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(MFI_normalised_log = log(MFI_normalised)) %>% 
+  dplyr::select(-c(MFI_normalised)) %>%
+  pivot_wider(names_from = "isotype_antigen", values_from = "MFI_normalised_log") %>%
+  dplyr::rename(target_D14_PTIgG = IgG_PT)  %>%
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender", "gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+# merge Day0 and Day14 data
+Ab_2020_D0_D14_log_norm_merge = Ab_2020_Day0_log_norm %>%
+  left_join(dplyr::select(Ab_2020_Day14_log_norm, all_of(c("subject_id", "target_D14_PTIgG"))), by = "subject_id") 
+
+# aggregate Day0 and Day14 FC data from 2020 dataset
+Ab_2020_D0_D14_FC = Ab_2020_sel %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "isotype_antigen", "MFI_normalised", "Age",  "infancy_vac", "Gender"))) %>%
+  filter(isotype_antigen == "IgG_PT") %>%
+  dplyr::rename(D0_IgG_PT_norm_MFI = MFI_normalised) %>%
+  left_join(Ab_2020_sel %>%
+              filter(timepoint == 14) %>%
+              filter(isotype_antigen == "IgG_PT") %>%
+              dplyr::select(all_of(c("subject_id", "MFI_normalised"))) %>%
+              dplyr::rename(D14_IgG_PT_norm_MFI = MFI_normalised), by = "subject_id") %>%
+  mutate(D14_D0_FC_IgG_PT = D14_IgG_PT_norm_MFI/D0_IgG_PT_norm_MFI) %>%
+  mutate(D14_D0_FC_IgG_PT_log = log(D14_D0_FC_IgG_PT)) %>% 
+  mutate(D14_D0_FC_IgG_PT_log_norm = scale(D14_D0_FC_IgG_PT_log))
+
+# *** on 2021 dataset *** #
+# select Day0 baseline 
+Ab_2021_Day0_log_norm = Ab_2021_sel %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "isotype_antigen", "MFI_normalised", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(MFI_normalised_log = log(MFI_normalised)) %>%
+  dplyr::select(-c(MFI_normalised)) %>%
+  pivot_wider(names_from = "isotype_antigen", values_from = "MFI_normalised_log") %>%
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender","gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+# select Day14 IgG PT
+Ab_2021_Day14_log_norm = Ab_2021_sel %>%
+  filter(timepoint == 14) %>%
+  filter(isotype_antigen == "IgG_PT") %>%
+  dplyr::select(all_of(c("subject_id", "isotype_antigen", "MFI_normalised", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(MFI_normalised_log = log(MFI_normalised)) %>% 
+  dplyr::select(-c(MFI_normalised)) %>%
+  pivot_wider(names_from = "isotype_antigen", values_from = "MFI_normalised_log") %>%
+  dplyr::rename(target_D14_PTIgG = IgG_PT)  %>%
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender", "gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+# merge Day0 and Day14 data
+Ab_2021_D0_D14_log_norm_merge = Ab_2021_Day0_log_norm %>%
+  left_join(dplyr::select(Ab_2021_Day14_log_norm, all_of(c("subject_id", "target_D14_PTIgG"))), by = "subject_id") 
+
+# aggregate Day0 and Day14 FC data from 2021 dataset
+Ab_2021_D0_D14_FC = Ab_2021_sel %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "isotype_antigen", "MFI_normalised", "Age",  "infancy_vac", "Gender"))) %>%
+  filter(isotype_antigen == "IgG_PT") %>%
+  dplyr::rename(D0_IgG_PT_norm_MFI = MFI_normalised) %>%
+  left_join(Ab_2021_sel %>%
+              filter(timepoint == 14) %>%
+              filter(isotype_antigen == "IgG_PT") %>%
+              dplyr::select(all_of(c("subject_id", "MFI_normalised"))) %>%
+              dplyr::rename(D14_IgG_PT_norm_MFI = MFI_normalised), by = "subject_id") %>%
+  mutate(D14_D0_FC_IgG_PT = D14_IgG_PT_norm_MFI/D0_IgG_PT_norm_MFI) %>%
+  mutate(D14_D0_FC_IgG_PT_log = log(D14_D0_FC_IgG_PT)) %>% 
+  mutate(D14_D0_FC_IgG_PT_log_norm = scale(D14_D0_FC_IgG_PT_log))
+
+# save data
+save(Ab_2020_Day0_log_norm, Ab_2020_Day14_log_norm, Ab_2020_D0_D14_log_norm_merge,
+     Ab_2021_Day0_log_norm, Ab_2021_Day14_log_norm, Ab_2021_D0_D14_log_norm_merge,
+     Ab_2020_D0_D14_FC, Ab_2021_D0_D14_FC,
+     file = "../ProcessedData/Ab_data_selection.Rdata")
+
+```
+
+# <span style="font-size:24px;"> 2. Cell Frequency data processing </span>
+
+```{r}
+#------------------------------------------------------------------------------#
+# CellFreq data selection
+#------------------------------------------------------------------------------#
+# *** on 2020 dataset *** #
+# select Day0 baseline
+Cell_2020_Day0_log_norm = cellfreq_2020_sel %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "cell_type_name", "percent_live_cell", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(percent_live_cell_log = log(percent_live_cell)) %>%
+  dplyr::select(-c(percent_live_cell)) %>%
+  pivot_wider(names_from = "cell_type_name", values_from = "percent_live_cell_log") %>%
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender", "gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+# select Day1 Monocytes
+Cell_2020_Day1_log_norm = cellfreq_2020_sel %>%
+  filter(timepoint == 1) %>%
+  filter(cell_type_name == "Monocytes") %>%
+  dplyr::select(all_of(c("subject_id", "cell_type_name", "percent_live_cell", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(percent_live_cell_log = log(percent_live_cell)) %>%
+  dplyr::select(-c(percent_live_cell)) %>%
+  pivot_wider(names_from = "cell_type_name", values_from = "percent_live_cell_log") %>%
+  dplyr::rename(target_D1_Mono = Monocytes) %>%
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender", "gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+# merge Day0 and Day1 data
+Cell_2020_D0_D1_log_norm_merge = Cell_2020_Day0_log_norm %>%
+  left_join(dplyr::select(Cell_2020_Day1_log_norm, all_of(c("subject_id", "target_D1_Mono"))), by = "subject_id") 
+
+# aggregate Day0 and Day1 FC data from 2020 dataset
+Cell_2020_D0_D1_FC = cellfreq_2020_sel %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "cell_type_name", "percent_live_cell", "Age",  "infancy_vac", "Gender"))) %>%
+  filter(cell_type_name == "Monocytes") %>%
+  dplyr::rename(D0_Mono_pert = percent_live_cell) %>%
+  left_join(cellfreq_2020_sel %>%
+              filter(timepoint == 1) %>%
+              filter(cell_type_name == "Monocytes") %>%
+              dplyr::select(all_of(c("subject_id", "percent_live_cell"))) %>%
+              dplyr::rename(D1_Mono_pert = percent_live_cell), by = "subject_id") %>%
+  mutate(D1_D0_FC_Mono = D1_Mono_pert/D0_Mono_pert) %>%
+  mutate(D1_D0_FC_Mono_log = log(D1_D0_FC_Mono)) %>% 
+  mutate(D1_D0_FC_Mono_log_norm = scale(D1_D0_FC_Mono_log))
+
+# *** on 2021 dataset *** #
+# select Day0 baseline
+Cell_2021_Day0_log_norm = cellfreq_2021_sel %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "cell_type_name", "percent_live_cell", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(percent_live_cell_log = log(percent_live_cell)) %>%
+  dplyr::select(-c(percent_live_cell)) %>%
+  pivot_wider(names_from = "cell_type_name", values_from = "percent_live_cell_log") %>%
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender","gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+# select Day1 Monocytes
+Cell_2021_Day1_log_norm = cellfreq_2021_sel %>%
+  filter(timepoint == 1) %>%
+  filter(cell_type_name == "Monocytes") %>%
+  dplyr::select(all_of(c("subject_id", "cell_type_name", "percent_live_cell", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(percent_live_cell_log = log(percent_live_cell)) %>%
+  dplyr::select(-c(percent_live_cell)) %>%
+  pivot_wider(names_from = "cell_type_name", values_from = "percent_live_cell_log") %>%
+  dplyr::rename(target_D1_Mono = Monocytes) %>%
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender", "gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+# merge Day0 and Day1 data
+Cell_2021_D0_D1_log_norm_merge = Cell_2021_Day0_log_norm %>%
+  left_join(dplyr::select(Cell_2021_Day1_log_norm, all_of(c("subject_id", "target_D1_Mono"))), by = "subject_id") 
+
+# aggregate Day0 and Day1 FC data from 2021 dataset
+Cell_2021_D0_D1_FC = cellfreq_2021_sel %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "cell_type_name", "percent_live_cell", "Age",  "infancy_vac", "Gender"))) %>%
+  filter(cell_type_name == "Monocytes") %>%
+  dplyr::rename(D0_Mono_pert = percent_live_cell) %>%
+  left_join(cellfreq_2021_sel %>%
+              filter(timepoint == 1) %>%
+              filter(cell_type_name == "Monocytes") %>%
+              dplyr::select(all_of(c("subject_id", "percent_live_cell"))) %>%
+              dplyr::rename(D1_Mono_pert = percent_live_cell), by = "subject_id") %>%
+  mutate(D1_D0_FC_Mono = D1_Mono_pert/D0_Mono_pert) %>%
+  mutate(D1_D0_FC_Mono_log = log(D1_D0_FC_Mono)) %>% 
+  mutate(D1_D0_FC_Mono_log_norm = scale(D1_D0_FC_Mono_log))
+
+# save data
+save(Cell_2020_Day0_log_norm, Cell_2020_Day1_log_norm, Cell_2020_D0_D1_log_norm_merge,
+     Cell_2021_Day0_log_norm, Cell_2021_Day1_log_norm, Cell_2021_D0_D1_log_norm_merge,
+     Cell_2020_D0_D1_FC, Cell_2021_D0_D1_FC, 
+     file = "../ProcessedData/CellFreq_data_selection.Rdata")
+```
+
+# <span style="font-size:24px;"> 3. Cytokine data processing </span>
+
+```{r}
+#------------------------------------------------------------------------------#
+# Cytokine data selection
+#------------------------------------------------------------------------------#
+process_cytokine_data = function(data){
+  cytokine_day0_log_norm = data %>% 
+    filter(timepoint == 0) %>%
+    filter(protein_expression > lower_limit_of_quantitation) %>% 
+    tidyr::unite(Cytokine, c("protein_id", "SYMBOL")) %>%
+    dplyr::select(all_of(c("subject_id", "Cytokine", "protein_expression", "Age",  "infancy_vac", "Gender"))) %>%
+    mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+    mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+    mutate(protein_expression_log = log(protein_expression)) %>% # log transform 
+    dplyr::select(-c(protein_expression)) %>%
+    pivot_wider(names_from = "Cytokine", values_from = "protein_expression_log") %>%
+    mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender", "gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+}
+# *** on 2020 dataset *** #
+# select Day0 baseline
+Cytokine_2020_Day0_log_norm = process_cytokine_data(cytokine_2020_sel)
+
+missing_2020 = sapply(Cytokine_2020_Day0_log_norm, function(x) sum(is.na(x)) / length(x))
+columns_to_keep_2020 = names(missing_2020)[missing_2020 <= 0.2]
+
+Cytokine_2020_Day0_log_norm = Cytokine_2020_Day0_log_norm %>% 
+  dplyr::select(all_of(columns_to_keep_2020))
+
+# *** on 2021 dataset *** #
+# select Day0 baseline
+Cytokine_2021_Day0_log_norm = process_cytokine_data(cytokine_2021_sel)
+
+missing_2021 = sapply(Cytokine_2021_Day0_log_norm, function(x) sum(is.na(x)) / length(x))
+columns_to_keep_2021 = names(missing_2021)[missing_2021 <= 0.2]
+
+Cytokine_2021_Day0_log_norm = Cytokine_2021_Day0_log_norm %>% 
+  dplyr::select(all_of(columns_to_keep_2021))
+
+# save data
+save(Cytokine_2020_Day0_log_norm, Cytokine_2021_Day0_log_norm,
+     file = "../ProcessedData/Cytokine_data_selection.Rdata")
+```
+
+# <span style="font-size:24px;"> 4. RNAseq data processing </span>
+
+```{r}
+#------------------------------------------------------------------------------#
+# RNAseq data selection
+#------------------------------------------------------------------------------#
+# *** select Day0 data *** #
+RNA_Day0 = rnaseq_dataset_combine %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "GeneID", "GeneSymbol", "raw_count", "Age",  "infancy_vac", "Gender")))
+
+# prepare data for DESeq format
+RNA_count_Day0 = RNA_Day0 %>% 
+  dplyr::select(c("GeneSymbol", "raw_count", "subject_id")) %>% 
+  pivot_wider(names_from = subject_id, values_from = raw_count, values_fn = {sum}) %>%
+  column_to_rownames("GeneSymbol") %>%
+  as.matrix()
+
+# meta data
+RNA_meta_Day0 = RNA_Day0 %>% 
+  dplyr::select(c("subject_id", "Age",  "infancy_vac", "Gender")) %>% 
+  distinct() %>%
+  mutate(Age = scale(Age)) %>%
+  column_to_rownames("subject_id")
+
+# assemble them
+RNA_matrix_Day0 = DESeqDataSetFromMatrix(countData = RNA_count_Day0,
+                                         colData = RNA_meta_Day0,
+                                         design = ~ 1)
+# Normalize and transform the data 
+RNA_matrix_Day0_norm = vst(RNA_matrix_Day0)
+
+# Retrieve the normalized data
+RNA_matrix_Day0_expr = assay(RNA_matrix_Day0_norm)
+
+# Calculate BTM score
+BTM_Day0 = gsva(RNA_matrix_Day0_expr,
+                BTM,
+                method = "gsva",
+                # Appropriate for our vst transformed data
+                kcdf = "Gaussian",
+                # Minimum gene set size
+                min.sz = 5,
+                # Maximum gene set size
+                max.sz = 500,
+                # Compute Gaussian-distributed scores
+                mx.diff = TRUE,
+                # Don't print out the progress bar
+                verbose = FALSE)
+BTM_Day0 = as.data.frame(t(BTM_Day0)) %>% rownames_to_column(var = "subject_id")
+# Find columns that contain 'TBA'
+columns_to_remove = grep("TBA", names(BTM_Day0), value = TRUE)
+# Remove these columns from the dataframe
+BTM_Day0 = BTM_Day0[, !(names(BTM_Day0) %in% columns_to_remove)]
+
+# Calculate variance for each gene
+gene_variances = apply(RNA_matrix_Day0_expr, 1, var)
+
+# Order genes by variance and select top 2000
+top_genes_2000 = head(order(gene_variances, decreasing = TRUE), 2000)
+top_genes_400 = head(order(gene_variances, decreasing = TRUE), 400)
+
+# Subset the expression matrix for the top genes
+RNA_matrix_Day0_expr_top2000 = RNA_matrix_Day0_expr[top_genes_2000, ]
+RNA_matrix_Day0_expr_top400 = RNA_matrix_Day0_expr[top_genes_400, ]
+
+# convert to dataframe type
+RNA_Day0_norm_top2000 = as.data.frame(t(RNA_matrix_Day0_expr_top2000)) %>% rownames_to_column(var = "subject_id")
+
+# *** select Day3 data *** #
+RNA_Day3 = rnaseq_dataset_combine %>%
+  filter(timepoint == 3) %>%
+  dplyr::select(all_of(c("subject_id", "GeneID", "GeneSymbol", "raw_count", "Age",  "infancy_vac", "Gender")))
+
+# prepare data for DESeq format
+RNA_count_Day3 = RNA_Day3 %>% 
+  dplyr::select(c("GeneSymbol", "raw_count", "subject_id")) %>% 
+  pivot_wider(names_from = subject_id, values_from = raw_count, values_fn = {sum}) %>%
+  column_to_rownames("GeneSymbol") %>%
+  as.matrix()
+
+# meta data
+RNA_meta_Day3 = RNA_Day3 %>% 
+  dplyr::select(c("subject_id", "Age",  "infancy_vac", "Gender")) %>% 
+  distinct() %>%
+  mutate(Age = scale(Age)) %>%
+  column_to_rownames("subject_id")
+
+# assemble them
+RNA_matrix_Day3 = DESeqDataSetFromMatrix(countData = RNA_count_Day3,
+                                         colData = RNA_meta_Day3,
+                                         design = ~ 1)
+# Normalize and transform the data 
+RNA_matrix_Day3_norm = vst(RNA_matrix_Day3)
+
+# Retrieve the normalized data
+RNA_matrix_Day3_expr = assay(RNA_matrix_Day3_norm)
+
+# Extract CCL3
+selected_row = RNA_matrix_Day3_expr["CCL3", ]
+# Transpose the row
+transposed_row = as.vector(selected_row)
+# Create a new data frame, setting the column names of the original matrix as subject_id
+RNA_Day3_CCL3 = data.frame(subject_id = colnames(RNA_matrix_Day3_expr), target_D3_CCL3 = transposed_row)
+
+# Extract CCL3
+selected_row_D0 = RNA_matrix_Day0_expr["CCL3", ]
+# Transpose the row
+transposed_row_D0 = as.vector(selected_row_D0)
+# Create a new data frame, setting the column names of the original matrix as subject_id
+RNA_Day0_CCL3 = data.frame(subject_id = colnames(RNA_matrix_Day0_expr), D0_CCL3 = transposed_row_D0)
+
+# merge D0 and D3 for CCL3 only
+RNA_D0_D3_CCL3_FC = RNA_Day0_CCL3 %>%
+  left_join(RNA_Day3_CCL3, by = "subject_id") %>%
+  mutate(D3_D0_FC_CCL3 = target_D3_CCL3/D0_CCL3) %>%
+  mutate(D3_D0_FC_CCL3_log = log(D3_D0_FC_CCL3)) %>% 
+  mutate(D3_D0_FC_CCL3_log_norm = scale(D3_D0_FC_CCL3_log))
+
+# combine Day0 and Day3
+RNA_Day0_norm_top2000_Day3_CCL3 = RNA_Day0_norm_top2000 %>%
+  dplyr::left_join(RNA_Day3_CCL3, by = "subject_id") 
+
+BTM_Day0_Day3_CCL3 = BTM_Day0 %>%
+  dplyr::left_join(RNA_Day3_CCL3, by = "subject_id") 
+
+# save
+save(RNA_matrix_Day0, RNA_matrix_Day0_norm, RNA_matrix_Day0_expr, BTM_Day0,
+     top_genes_2000, RNA_matrix_Day0_expr_top2000, RNA_Day0_norm_top2000,
+     RNA_matrix_Day3, RNA_matrix_Day3_norm, RNA_matrix_Day3_expr, 
+     RNA_Day3_CCL3, RNA_Day0_norm_top2000_Day3_CCL3, BTM_Day0_Day3_CCL3,
+     RNA_D0_D3_CCL3_FC, 
+     file = "../ProcessedData/RNA_data_selection.Rdata")
+
+```
+# <span style="font-size:24px;"> 5. Check sample availability/overlap across assays </span>
+
+```{r}
+#-----------------------------------------------------------------------------#
+# Check subject overlaps across assays
+#-----------------------------------------------------------------------------#
+ids_ab = c(unique(Ab_2020_sel$subject_id),unique(Ab_2021_sel$subject_id))
+ids_cellfreq = c(unique(cellfreq_2020_sel$subject_id),unique(cellfreq_2021_sel$subject_id))
+ids_cytokine = c(unique(cytokine_2020_sel$subject_id),unique(cytokine_2021_sel$subject_id))
+ids_rna = unique(rnaseq_dataset_combine$subject_id)
+
+ggVennDiagram(
+  list(RNA = ids_rna,
+       Cytokine = ids_cytokine,
+       CellFreq = ids_cellfreq,
+       Antibody = ids_ab),
+  show_intersect = FALSE, 
+  set_color = "black"
+) + theme(legend.position = "none")
+
+```
+
+# <span style="font-size:24px;"> 6. Prepare prediction dataset (2022) </span>
+
+```{r, warning=FALSE, message=FALSE}
+load("../ProcessedData/Ab_dataset_2022.Rdata")
+load("../ProcessedData/cellfreq_dataset_2022.Rdata")
+load("../ProcessedData/cytokine_dataset_2022.Rdata")
+load("../ProcessedData/rnaseq_dataset_2022.Rdata")
+
+#------------------------------------------------------------------------------#
+# Ab data selection
+#------------------------------------------------------------------------------#
+# *** on 2022 dataset *** #
+# select Day0 baseline
+Ab_2022_Day0_log = Ab_2022_sel %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "isotype_antigen", "MFI_normalised", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(MFI_normalised_log = log(MFI_normalised)) %>%
+  dplyr::select(-c(MFI_normalised)) %>%
+  pivot_wider(names_from = "isotype_antigen", values_from = "MFI_normalised_log")
+
+# impute na value by median
+# Loop over each column in the dataframe
+for (i in seq_along(Ab_2022_Day0_log)) {
+  # Check if the column is numeric since median makes sense for numeric columns
+  if (is.numeric(Ab_2022_Day0_log[[i]])) {
+    # Replace NA with median of that column
+    Ab_2022_Day0_log[[i]][Ab_2022_Day0_log[[i]] == -Inf] <- median(Ab_2022_Day0_log[[i]], na.rm = TRUE)
+  }
+}
+
+Ab_2022_Day0_log_norm = Ab_2022_Day0_log %>% 
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender","gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+#------------------------------------------------------------------------------#
+# CellFreq data selection
+#------------------------------------------------------------------------------#
+# *** on 2022 dataset *** #
+# select Day0 baseline
+Cell_2022_Day0_log = cellfreq_2022_sel %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "cell_type_name", "percent_live_cell", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(percent_live_cell_log = log(percent_live_cell)) %>%
+  dplyr::select(-c(percent_live_cell)) %>%
+  pivot_wider(names_from = "cell_type_name", values_from = "percent_live_cell_log") 
+
+# impute na value by median
+# Loop over each column in the dataframe
+for (i in seq_along(Cell_2022_Day0_log)) {
+  # Check if the column is numeric since median makes sense for numeric columns
+  if (is.numeric(Cell_2022_Day0_log[[i]])) {
+    # Replace NA with median of that column
+    Cell_2022_Day0_log[[i]][Cell_2022_Day0_log[[i]] == -Inf] <- median(Cell_2022_Day0_log[[i]], na.rm = TRUE)
+  }
+}
+
+Cell_2022_Day0_log_norm = Cell_2022_Day0_log %>%
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender", "gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+#------------------------------------------------------------------------------#
+# Cytokine data selection
+#------------------------------------------------------------------------------#
+# *** on 2022 dataset *** #
+# select Day0 baseline
+Cytokine_2022_Day0_log_norm = cytokine_2022_sel %>%
+  filter(timepoint == 0) %>%
+  filter(protein_expression > lower_limit_of_quantitation) %>% 
+  # unite(Cytokine, c("protein_id", "SYMBOL")) %>%
+  dplyr::select(all_of(c("subject_id", "Cytokine", "protein_expression", "Age",  "infancy_vac", "Gender"))) %>%
+  mutate(gender_numeric = ifelse(Gender == "Female", 0, 1)) %>%
+  mutate(infancy_vac_numeric = ifelse(infancy_vac == "aP", 0, 1)) %>%
+  mutate(protein_expression_log = log(protein_expression)) %>% # log transform 
+  dplyr::select(-c(protein_expression)) %>%
+  pivot_wider(names_from = "Cytokine", values_from = "protein_expression_log") %>%
+  mutate(across(-all_of(c("subject_id", "Age", "infancy_vac", "Gender", "gender_numeric", "infancy_vac_numeric")), ~ scale(.)))
+
+missing_2022 = sapply(Cytokine_2022_Day0_log_norm, function(x) sum(is.na(x)) / length(x))
+columns_to_keep_2022 = names(missing_2022)[missing_2022 <= 0.2]
+
+Cytokine_2022_Day0_log_norm = Cytokine_2022_Day0_log_norm %>% 
+  dplyr::select(all_of(columns_to_keep_2022))
+
+#------------------------------------------------------------------------------#
+# RNAseq data selection
+#------------------------------------------------------------------------------#
+# *** select Day0 data *** #
+RNA_Day0 = rnaseq_2022_annot %>%
+  filter(timepoint == 0) %>%
+  dplyr::select(all_of(c("subject_id", "GeneID", "GeneSymbol", "raw_count", "Age",  "infancy_vac", "Gender")))
+
+# prepare data for DESeq format
+RNA_count_Day0 = RNA_Day0 %>% 
+  dplyr::select(c("GeneSymbol", "raw_count", "subject_id")) %>% 
+  pivot_wider(names_from = subject_id, values_from = raw_count, values_fn = {sum}) %>%
+  column_to_rownames("GeneSymbol") %>%
+  as.matrix()
+
+# meta data
+RNA_meta_Day0 = RNA_Day0 %>% 
+  dplyr::select(c("subject_id", "Age",  "infancy_vac", "Gender")) %>% 
+  distinct() %>%
+  mutate(Age = scale(Age)) %>%
+  column_to_rownames("subject_id")
+
+# assemble them
+RNA_matrix_Day0 = DESeqDataSetFromMatrix(countData = RNA_count_Day0,
+                                         colData = RNA_meta_Day0,
+                                         design = ~ 1)
+# Normalize and transform the data 
+RNA_matrix_Day0_norm = vst(RNA_matrix_Day0)
+
+# Retrieve the normalized data
+RNA_matrix_Day0_expr = assay(RNA_matrix_Day0_norm)
+
+# Calculate BTM score
+BTM_Day0 = gsva(RNA_matrix_Day0_expr,
+                BTM,
+                method = "gsva",
+                # Appropriate for our vst transformed data
+                kcdf = "Gaussian",
+                # Minimum gene set size
+                min.sz = 5,
+                # Maximum gene set size
+                max.sz = 500,
+                # Compute Gaussian-distributed scores
+                mx.diff = TRUE,
+                # Don't print out the progress bar
+                verbose = FALSE)
+BTM_2022_Day0 = as.data.frame(t(BTM_Day0)) %>% rownames_to_column(var = "subject_id")
+# Find columns that contain 'TBA'
+columns_to_remove = grep("TBA", names(BTM_2022_Day0), value = TRUE)
+# Remove these columns from the dataframe
+BTM_2022_Day0 = BTM_2022_Day0[, !(names(BTM_2022_Day0) %in% columns_to_remove)]
+
+# Calculate variance for each gene
+gene_variances = apply(RNA_matrix_Day0_expr, 1, var)
+
+# Order genes by variance and select top 2000
+# load("../ProcessedData/RNA_data_selection.Rdata")
+top_genes_2000_from_train = colnames(RNA_Day0_norm_top2000_Day3_CCL3)[2:2001]
+
+# Subset the expression matrix for the top genes
+RNA_matrix_Day0_expr_top2000 = RNA_matrix_Day0_expr[top_genes_2000_from_train, ]
+RNA_matrix_Day0_expr_top400 = RNA_matrix_Day0_expr[top_genes_2000_from_train[1:400], ]
+
+# convert to dataframe type
+RNA_2022_Day0_norm_top2000 = as.data.frame(t(RNA_matrix_Day0_expr_top2000)) %>% rownames_to_column(var = "subject_id")
+RNA_2022_Day0_norm_top400 = as.data.frame(t(RNA_matrix_Day0_expr_top400)) %>% rownames_to_column(var = "subject_id")
+
+# save all processed data
+save(Ab_2022_Day0_log_norm, Cell_2022_Day0_log_norm, Cytokine_2022_Day0_log_norm, 
+     BTM_2022_Day0, RNA_2022_Day0_norm_top400, RNA_2022_Day0_norm_top2000,
+     file = "../ProcessedData/Prediction2022_All_Day0.Rdata")
+```

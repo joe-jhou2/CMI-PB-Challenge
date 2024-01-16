@@ -1,0 +1,114 @@
+---
+title: "Data Description and Check - Cell Frequency"
+output: html_document
+date: "2024-01-12"
+author: Joe Hou, Yunda Huang, James Kobie
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(hrbrthemes)
+library(GGally)
+library(viridis)
+library(dplyr)
+library(tidyverse)
+library(corrplot)
+library(RColorBrewer)
+library(xlsx)
+library(funkyheatmap)
+load("../RawData/Subject_Specimen_info.Rdata")
+```
+
+<div style="font-size:20px;">
+  Here's the data check and description on cell frequency (from flow cytometry) data over 2020, 2021 and 2022 dataset. 
+</div>
+
+# <span style="font-size:24px;"> Data loading and processing </span>
+
+```{r}
+
+# load data, cell frequency
+cellfreq_2020 = read.csv("../RawData/Training/2020/2020LD_pbmc_cell_frequency.tsv", sep = "\t")
+cellfreq_2021 = read.csv("../RawData/Training/2021/2021LD_pbmc_cell_frequency.tsv", sep = "\t")
+cellfreq_2022 = read.csv("../RawData/Prediction/2022BD_pbmc_cell_frequency.tsv", sep = "\t")
+```
+
+# <span style="font-size:24px;">Cell Frequency variables availability across 2020, 2021 and 2022 dataset </span>
+
+```{r overlap figure}
+# check overlap
+overlap_check = data.frame(matrix(NA, ncol = 4, nrow = 53))
+colnames(overlap_check) = c("celltype","Y2020", "Y2021", "Y2022")
+overlap_check$celltype = unique(combine(unique(cellfreq_2020$cell_type_name), unique(cellfreq_2021$cell_type_name)))
+overlap_check[overlap_check$celltype  %in% unique(cellfreq_2020$cell_type_name),2] = 1
+overlap_check[overlap_check$celltype  %in% unique(cellfreq_2021$cell_type_name),3] = 1
+overlap_check[overlap_check$celltype  %in% unique(cellfreq_2022$cell_type_name),4] = 1
+overlap_check[is.na(overlap_check)] = 0
+
+overlap_check = overlap_check %>% arrange(desc(rowSums(dplyr::select(., Y2020, Y2021, Y2022) == 1)),
+                                desc(Y2020),
+                                desc(Y2021),
+                                desc(Y2022))
+```
+
+```{r, echo=FALSE, fig.width=10, fig.height=15, warning=FALSE, message=FALSE}
+# plot cell type overlap over years
+column_info = tribble(
+  ~id,         ~group,      ~name,    ~geom,            ~palette,           ~options,
+  "celltype",      "",       "",       "text",           NA,                 list(hjust = 1, width = 20),
+  "Y2020",       "",       "Y2020",     "funkyrect",     "palette1",          list(),
+  "Y2021",       "",       "Y2021",     "funkyrect",     "palette1",          list(),
+  "Y2022",       "",       "Y2022",     "funkyrect",     "palette1",          list())
+
+funky_heatmap(overlap_check, column_info = column_info, scale_column = FALSE, 
+              palettes =  list(palette1 = "black"), 
+              expand = list(xmax = 1), col_annot_angle = 90)
+```
+
+# <span style="font-size:24px;">Check main variables across dataset </span>
+
+```{r}
+# clean up and sort out
+cellfreq_2020_sel = cellfreq_2020 %>% 
+  left_join(select(Specimen_2020_sel, all_of(c("specimen_id", "subject_id", "dataset", "day_plot"))), by = "specimen_id") %>%
+  left_join(select(Subject_2020, all_of(c("subject_id", "infancy_vac"))), by = "subject_id")
+
+cellfreq_2021_sel = cellfreq_2021 %>% 
+  left_join(select(Specimen_2021_sel, all_of(c("specimen_id", "subject_id", "dataset", "day_plot"))), by = "specimen_id") %>%
+  left_join(select(Subject_2021, all_of(c("subject_id", "infancy_vac"))), by = "subject_id")
+
+# combine two datasets
+cellfreq_dataset_combine = rbind(cellfreq_2020_sel, cellfreq_2021_sel) %>% 
+  filter(day_plot %in% c(0, 1, 3, 7, 14)) %>% 
+  select(all_of(c("cell_type_name", "percent_live_cell", "day_plot", "subject_id", "infancy_vac", "dataset"))) %>%
+  mutate(Day = factor(paste0("Day", day_plot), levels = c("Day0", "Day1", "Day3", "Day7", "Day14"))) %>%
+  unite(vac_yr, c("infancy_vac", "dataset")) %>%
+  mutate(vac_yr = factor(vac_yr, levels = c("aP_2020", "wP_2020", "aP_2021", "wP_2021")))
+```
+
+```{r, echo=FALSE, fig.width=15, fig.height=6}
+cellfreq_dataset_combine %>%
+  filter(cell_type_name %in% c("Monocytes", "Classical_Monocytes")) %>% 
+  mutate(cell_type_name = factor(cell_type_name, levels = c("Monocytes", "Classical_Monocytes"))) %>%
+  ggplot(aes(x = Day , y = percent_live_cell, group = subject_id, color = vac_yr)) +
+  geom_line() +
+  geom_point(aes()) +
+  scale_x_discrete(expand = c(0.03,0.03)) + 
+  ylab("Given cell% in total immune cells") +
+  facet_grid(cell_type_name ~ vac_yr, scales = "free_y") + 
+  scale_color_manual(values=c("aP_2020" = "#DB4437", "wP_2020" = "#0F9D58",  
+                              "aP_2021"=  "#F4B400", "wP_2021"= "#4285F4")) + 
+  theme_bw() +
+  theme(panel.background = element_rect(color = "black"),
+        panel.grid.major = element_line(color = "gray"),
+        panel.grid.minor = element_line(color = "gray"),
+        panel.spacing.x = unit(1.5, "lines"),
+        strip.text = element_text(size = 16),
+        plot.title = element_text(size = 16),
+        axis.text.x  = element_text(size = 14),
+        axis.text.y  = element_text(size = 14),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 14),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14))
+```

@@ -1,0 +1,256 @@
+---
+title: "Data Processing part1"
+author: "Joe Hou, Yunda Huang, James Kobie"
+date: "2024-01-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(hrbrthemes)
+library(GGally)
+library(viridis)
+library(dplyr)
+library(tidyverse)
+library(corrplot)
+library(RColorBrewer)
+library(xlsx)
+library(clusterProfiler)
+load("../ProcessedData/Subject_Specimen_info.Rdata")
+```
+
+<div style="font-size:20px;">
+  Here're showing how the data including Ab data, cell frequency data, cytokine data, and RNAseq data, have been processed. 
+</div>
+
+# <span style="font-size:24px;"> 1. Ab data processing </span>
+
+```{r}
+#-----------------------------------------------------------------------------#
+# Ab data prepration
+#-----------------------------------------------------------------------------#
+# load data, Ab titre
+Ab_2020 = read.csv("../RawData/Training/2020/2020LD_plasma_ab_titer.tsv", sep = "\t")
+Ab_2021 = read.csv("../RawData/Training/2021/2021LD_plasma_ab_titer.tsv", sep = "\t")
+Ab_2022 = read.csv("../RawData/Prediction/2022BD_plasma_ab_titer.tsv", sep = "\t")
+
+# Add subject level info for each specimen
+Ab_2020_sel = Ab_2020 %>% 
+  left_join(select(Specimen_2020_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(select(Subject_2020, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  filter(antigen %in% c("FHA", "FIM2/3", "PRN", "PT", "DT", "TT", "OVA")) %>%
+  filter(isotype != c("IgE")) %>%
+  mutate(isotype_antigen = paste(isotype, antigen, sep = "_")) %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+  
+Ab_2021_sel = Ab_2021 %>% 
+  left_join(select(Specimen_2021_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(select(Subject_2021, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  mutate(isotype_antigen = paste(isotype, antigen, sep = "_")) %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+Ab_2022_sel = Ab_2022 %>% 
+  left_join(dplyr::select(Specimen_2022_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(dplyr::select(Subject_2022, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  mutate(isotype_antigen = paste(isotype, antigen, sep = "_")) %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+# Merge two datasets
+Ab_dataset_combine = rbind(Ab_2020_sel, Ab_2021_sel) %>% 
+  filter(timepoint %in% c(0, 1, 3, 7, 14)) %>% 
+  select(all_of(c( "subject_id", "isotype_antigen", "antigen", "isotype", "MFI_normalised", "timepoint", "infancy_vac", "Age", "Gender"))) %>%
+  mutate(antigen = factor(antigen, levels = c("FHA", "FIM2/3", "PRN", "PT", "DT", "TT", "OVA")))
+
+Ab_2022_sel = Ab_2022_sel %>% 
+  filter(timepoint %in% c(0, 1, 3, 7, 14)) %>% 
+  dplyr::select(all_of(c( "subject_id", "isotype_antigen", "antigen", "isotype", "MFI_normalised", "timepoint", "infancy_vac", "Age", "Gender"))) %>%
+  mutate(antigen = factor(antigen, levels = c("FHA", "FIM2/3", "PRN", "PT", "DT", "TT", "OVA")))
+
+save(Ab_2020_sel, Ab_2021_sel, Ab_dataset_combine, file = "../ProcessedData/Ab_dataset_training_combine.Rdata")
+save(Ab_2022_sel, file = "../ProcessedData/Ab_dataset_2022.Rdata")
+```
+
+# <span style="font-size:24px;"> 2. Cell Frequency data processing </span>
+
+```{r}
+#-----------------------------------------------------------------------------#
+# Cell Frequency data prepration
+#-----------------------------------------------------------------------------#
+# load data, cell frequency
+cellfreq_2020 = read.csv("../RawData/Training/2020/2020LD_pbmc_cell_frequency.tsv", sep = "\t")
+cellfreq_2021 = read.csv("../RawData/Training/2021/2021LD_pbmc_cell_frequency.tsv", sep = "\t")
+cellfreq_2022 = read.csv("../RawData/Prediction/2022BD_pbmc_cell_frequency.tsv", sep = "\t")
+
+# clean up and sort out
+cellfreq_2020_sel = cellfreq_2020 %>% 
+  left_join(select(Specimen_2020_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(select(Subject_2020, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+cellfreq_2021_sel = cellfreq_2021 %>% 
+  left_join(select(Specimen_2021_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(select(Subject_2021, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+cellfreq_2022_sel = cellfreq_2022 %>% 
+  left_join(select(Specimen_2022_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(select(Subject_2022, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+# combine two datasets
+cellfreq_dataset_combine = rbind(cellfreq_2020_sel, cellfreq_2021_sel) %>% 
+  filter(timepoint %in% c(0, 1, 3, 7, 14)) %>% 
+  select(all_of(c("subject_id", "cell_type_name", "percent_live_cell", "timepoint",  "infancy_vac", "Age", "Gender")))
+
+cellfreq_2022_sel = cellfreq_2022_sel %>% 
+  filter(timepoint %in% c(0, 1, 3, 7, 14)) %>% 
+  select(all_of(c("subject_id", "cell_type_name", "percent_live_cell", "timepoint",  "infancy_vac", "Age", "Gender")))
+
+save(cellfreq_2020_sel, cellfreq_2021_sel, cellfreq_dataset_combine, file = "../ProcessedData/cellfreq_dataset_training_combine.Rdata")
+save(cellfreq_2022_sel, file = "../ProcessedData/cellfreq_dataset_2022.Rdata")
+```
+
+# <span style="font-size:24px;"> 3. Cytokine data processing </span>
+
+```{r, warning=FALSE, message=FALSE}
+#-----------------------------------------------------------------------------#
+# Cytokine data prepration
+#-----------------------------------------------------------------------------#
+# load data, cytokine
+cytokine_2020 = read.csv("../RawData/Training/2020/2020LD_plasma_cytokine_concentration.tsv", sep = "\t")
+cytokine_2021 = read.csv("../RawData/Training/2021/2021LD_plasma_cytokine_concentration.tsv", sep = "\t")
+cytokine_2022 = read.csv("../RawData/Prediction/2022BD_plasma_cytokine_concentration.tsv", sep = "\t")
+
+# only keep cytokine remained in 2021 dataset, 2020 dataset only have 30 cytokine carry for next step
+cytokine_2020 = cytokine_2020[cytokine_2020$protein_id %in% unique(cytokine_2021$protein_id),]
+
+# convert UNIPROT to Gene Symbol
+Protein_IDs_2020 = bitr(unique(cytokine_2020$protein_id), fromType="UNIPROT" , toType="SYMBOL", OrgDb="org.Hs.eg.db") 
+# remove one mismatching
+Protein_IDs_2020 = Protein_IDs_2020[!(Protein_IDs_2020$UNIPROT == "P13236" & Protein_IDs_2020$SYMBOL != "CCL4"),]
+Protein_IDs_2020 = Protein_IDs_2020[!(Protein_IDs_2020$UNIPROT == "O43508" & Protein_IDs_2020$SYMBOL != "TNFSF12"),]
+
+Protein_IDs_2021 = bitr(unique(cytokine_2021$protein_id), fromType="UNIPROT" , toType="SYMBOL", OrgDb="org.Hs.eg.db") 
+Protein_IDs_2021 = Protein_IDs_2021[!(Protein_IDs_2021$UNIPROT == "P13236" & Protein_IDs_2021$SYMBOL != "CCL4"),]
+Protein_IDs_2021 = Protein_IDs_2021[!(Protein_IDs_2021$UNIPROT == "O43508" & Protein_IDs_2021$SYMBOL != "TNFSF12"),]
+Protein_IDs_2021[nrow(Protein_IDs_2021) + 1,] = c("Q8NEV9_Q14213","IL12")
+
+# only keep cytokine remained in 2021 dataset, 
+cytokine_2022 = cytokine_2022[cytokine_2022$protein_id %in% unique(cytokine_2021$protein_id),]
+
+Protein_IDs_2022 = bitr(unique(cytokine_2022$protein_id), fromType="UNIPROT" , toType="SYMBOL", OrgDb="org.Hs.eg.db") 
+Protein_IDs_2022 = Protein_IDs_2022[!(Protein_IDs_2022$UNIPROT == "P13236" & Protein_IDs_2022$SYMBOL != "CCL4"),]
+Protein_IDs_2022 = Protein_IDs_2022[!(Protein_IDs_2022$UNIPROT == "O43508" & Protein_IDs_2022$SYMBOL != "TNFSF12"),]
+Protein_IDs_2022[nrow(Protein_IDs_2022) + 1,] = c("Q8NEV9_Q14213","IL12")
+
+# clean up and sort out
+cytokine_2020_sel = cytokine_2020 %>% 
+  left_join(select(Specimen_2020_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(select(Subject_2020, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  left_join(Protein_IDs_2020, by = c("protein_id" = "UNIPROT")) %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+cytokine_2021_sel = cytokine_2021 %>% 
+  left_join(select(Specimen_2021_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(select(Subject_2021, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  left_join(Protein_IDs_2021, by = c("protein_id" = "UNIPROT")) %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+cytokine_2022_sel = cytokine_2022 %>% 
+  left_join(select(Specimen_2022_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(select(Subject_2022, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  left_join(Protein_IDs_2022, by = c("protein_id" = "UNIPROT")) %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+# combine two datasets
+cytokine_dataset_combine = rbind(cytokine_2020_sel, cytokine_2021_sel) %>% 
+  filter(timepoint %in% c(0, 1, 3, 7, 14)) %>% 
+  select(all_of(c("subject_id", "protein_id", "SYMBOL", "protein_expression", "lower_limit_of_quantitation","timepoint", "infancy_vac", "Age", "Gender"))) %>%
+  unite(Cytokine, c("protein_id", "SYMBOL"))
+
+cytokine_2022_sel = cytokine_2022_sel %>% 
+  filter(timepoint %in% c(0, 1, 3, 7, 14)) %>% 
+  select(all_of(c("subject_id", "protein_id", "SYMBOL", "protein_expression", "lower_limit_of_quantitation","timepoint", "infancy_vac", "Age", "Gender"))) %>%
+  unite(Cytokine, c("protein_id", "SYMBOL"))
+
+save(cytokine_2020_sel, cytokine_2021_sel, cytokine_dataset_combine, file = "../ProcessedData/cytokine_dataset_training_combine.Rdata")
+save(cytokine_2022_sel, file = "../ProcessedData/cytokine_dataset_2022.Rdata")
+```
+
+# <span style="font-size:24px;"> 4. RNAseq data processing </span>
+
+```{r}
+#-----------------------------------------------------------------------------#
+# RNAseq data prepration
+#-----------------------------------------------------------------------------#
+# load RNAseq data, TPM readout
+rnaseq_2020 = read.csv("../RawData/Training/2020/2020LD_pbmc_gene_expression.tsv", sep = "\t")
+rnaseq_2021 = read.csv("../RawData/Training/2021/2021LD_pbmc_gene_expression.tsv", sep = "\t")
+rnaseq_2022 = read.csv("../RawData/Prediction/2022BD_pbmc_gene_expression.tsv", sep = "\t")
+
+# annotate expression matrix
+GeneSymbol = read.csv("../RawData/gene_90_38_export.tsv", sep = "\t")
+GeneSymbol = GeneSymbol[!duplicated(GeneSymbol$versioned_ensembl_gene_id),]
+
+# label samples
+rnaseq_2020_annot = rnaseq_2020 %>% 
+  left_join(dplyr::select(GeneSymbol, all_of(c("versioned_ensembl_gene_id", "display_label", "biotype"))), by = "versioned_ensembl_gene_id") %>%
+  dplyr::filter(biotype == "protein_coding" | str_detect(biotype, "IG_") | str_detect(biotype, "TR_")) %>%
+  left_join(dplyr::select(Specimen_2020_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(dplyr::select(Subject_2020, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+rnaseq_2021_annot = rnaseq_2021 %>% 
+  left_join(dplyr::select(GeneSymbol, all_of(c("versioned_ensembl_gene_id","display_label", "biotype"))), by = "versioned_ensembl_gene_id") %>%
+  filter(biotype == "protein_coding" | str_detect(biotype, "IG_") | str_detect(biotype, "TR_")) %>%
+  left_join(dplyr::select(Specimen_2021_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(dplyr::select(Subject_2021, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+rnaseq_2022_annot = rnaseq_2022 %>% 
+  left_join(dplyr::select(GeneSymbol, all_of(c("versioned_ensembl_gene_id","display_label", "biotype"))), by = "versioned_ensembl_gene_id") %>%
+  filter(biotype == "protein_coding" | str_detect(biotype, "IG_") | str_detect(biotype, "TR_")) %>%
+  left_join(dplyr::select(Specimen_2022_sel, all_of(c("specimen_id", "subject_id", "dataset", "planned_day_relative_to_boost"))), by = "specimen_id") %>%
+  left_join(dplyr::select(Subject_2022, all_of(c("subject_id", "infancy_vac", "biological_sex", "age_at_boost"))), by = "subject_id") %>%
+  dplyr::rename(timepoint = planned_day_relative_to_boost,
+                Age = age_at_boost,
+                Gender = biological_sex)
+
+# combine two datasets
+rnaseq_dataset_combine = rbind(rnaseq_2020_annot, rnaseq_2021_annot) %>% 
+  filter(timepoint %in% c(0, 1, 3, 7, 14)) %>% 
+  dplyr::select(all_of(c("subject_id", "versioned_ensembl_gene_id", "display_label", "timepoint", "raw_count", "tpm","infancy_vac", "Age", "Gender"))) %>%
+  dplyr::rename(GeneID = versioned_ensembl_gene_id,
+                GeneSymbol = display_label)
+
+rnaseq_2022_annot = rnaseq_2022_annot %>% 
+  filter(timepoint %in% c(0, 1, 3, 7, 14)) %>% 
+  dplyr::select(all_of(c("subject_id", "versioned_ensembl_gene_id", "display_label", "timepoint", "raw_count", "tpm","infancy_vac", "Age", "Gender"))) %>%
+  dplyr::rename(GeneID = versioned_ensembl_gene_id,
+                GeneSymbol = display_label)
+
+save(rnaseq_2020_annot, rnaseq_2021_annot,rnaseq_dataset_combine, file = "../ProcessedData/rnaseq_dataset_training_combine.Rdata")
+save(rnaseq_2022_annot, file = "../ProcessedData/rnaseq_dataset_2022.Rdata")
+```
